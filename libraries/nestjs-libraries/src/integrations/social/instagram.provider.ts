@@ -537,22 +537,24 @@ export class InstagramProvider
             : ``;
         const isCarousel =
           (firstPost?.media?.length || 0) > 1 && !isStory ? `&is_carousel_item=true` : ``;
+        const safePath = m.path.indexOf('?') > -1 ? encodeURIComponent(m.path) : m.path;
+        const cleanPath = m.path.split('?')[0];
         const mediaType =
-          m.path.indexOf('.mp4') > -1
+          cleanPath.indexOf('.mp4') > -1
             ? firstPost?.media?.length === 1
               ? isStory
-                ? `video_url=${m.path}&media_type=STORIES`
-                : `video_url=${m.path}&media_type=REELS&thumb_offset=${
+                ? `video_url=${safePath}&media_type=STORIES`
+                : `video_url=${safePath}&media_type=REELS&thumb_offset=${
                     m?.thumbnailTimestamp || 0
                   }`
               : isStory
-              ? `video_url=${m.path}&media_type=STORIES`
-              : `video_url=${m.path}&media_type=VIDEO&thumb_offset=${
+              ? `video_url=${safePath}&media_type=STORIES`
+              : `video_url=${safePath}&media_type=VIDEO&thumb_offset=${
                   m?.thumbnailTimestamp || 0
                 }`
             : isStory
-            ? `image_url=${m.path}&media_type=STORIES`
-            : `image_url=${m.path}`;
+            ? `image_url=${safePath}&media_type=STORIES`
+            : `image_url=${safePath}`;
 
         const trialParams = isTrialReel
           ? `&trial_params=${encodeURIComponent(

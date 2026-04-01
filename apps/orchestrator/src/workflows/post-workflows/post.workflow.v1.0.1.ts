@@ -35,6 +35,7 @@ const {
   updatePost,
   sendWebhooks,
   isCommentable,
+  notifyContentFactory,
 } = proxyActivities<PostActivity>({
   startToCloseTimeout: '10 minute',
   retry: {
@@ -208,6 +209,24 @@ export async function postWorkflowV101({
         // for other errors, change state and inform the user if needed
         await changeState(postsList[0].id, 'ERROR', err, postsList);
 
+        const errMsg =
+          err instanceof ActivityFailure && err.cause instanceof ApplicationFailure
+            ? err.cause.message
+            : String(err);
+
+        try {
+          await notifyContentFactory(
+            postId,
+            'ERROR',
+            post.integration?.providerIdentifier || 'unknown',
+            post.integration?.name || '',
+            undefined,
+            errMsg
+          );
+        } catch {
+          // best-effort
+        }
+
         // specific case for bad body errors
         if (
           err instanceof ActivityFailure &&
@@ -243,6 +262,18 @@ export async function postWorkflowV101({
     post.organizationId,
     post.integration.id
   );
+
+  try {
+    await notifyContentFactory(
+      postId,
+      'PUBLISHED',
+      post.integration.providerIdentifier,
+      post.integration.name || '',
+      postsResults[0].releaseURL
+    );
+  } catch {
+    // best-effort
+  }
 
   // load internal plugs like repost by other users
   const internalPlugsList = await internalPlugs(

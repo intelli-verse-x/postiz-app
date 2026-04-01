@@ -119,6 +119,38 @@ export class PostsService {
     }
   }
 
+  async notifyContentFactory(
+    postId: string,
+    state: 'PUBLISHED' | 'ERROR',
+    provider: string,
+    channelName: string,
+    releaseURL?: string,
+    errorMessage?: string
+  ): Promise<void> {
+    const cfApiBase =
+      process.env.CF_API_URL ||
+      'http://content-factory-api.aicart.svc.cluster.local:8000';
+    try {
+      await axios.post(
+        `${cfApiBase}/api/automation/publish-status`,
+        {
+          postiz_post_id: postId,
+          state,
+          provider,
+          channel_name: channelName,
+          release_url: releaseURL || null,
+          error: errorMessage || null,
+          timestamp: new Date().toISOString(),
+        },
+        { timeout: 10000 }
+      );
+    } catch (err) {
+      console.error(
+        `[notifyContentFactory] Failed to notify CF API: ${err}`
+      );
+    }
+  }
+
   searchForMissingThreeHoursPosts() {
     return this._postRepository.searchForMissingThreeHoursPosts();
   }
@@ -399,16 +431,18 @@ export class PostsService {
       const withUrls = await Promise.all(
         resolvedMedia.map(async (m) => {
           let effectivePath = m.path;
+          const isHttp = effectivePath.indexOf('http') !== -1;
           if (
-            effectivePath.indexOf('http') !== -1 &&
-            effectivePath.includes('s3.amazonaws.com')
+            isHttp &&
+            (effectivePath.includes('amazonaws.com') ||
+              effectivePath.includes('s3-redirect'))
           ) {
             effectivePath = await this.refreshS3PresignedUrl(effectivePath);
           }
           return {
             ...m,
             url:
-              effectivePath.indexOf('http') === -1
+              !isHttp
                 ? process.env.FRONTEND_URL +
                   '/' +
                   process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY +
@@ -416,7 +450,7 @@ export class PostsService {
                 : effectivePath,
             type: 'image',
             path:
-              effectivePath.indexOf('http') === -1
+              !isHttp
                 ? process.env.UPLOAD_DIRECTORY + effectivePath
                 : effectivePath,
           };

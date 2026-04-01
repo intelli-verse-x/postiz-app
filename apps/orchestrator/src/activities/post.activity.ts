@@ -307,6 +307,25 @@ export class PostActivity {
   }
 
   @ActivityMethod()
+  async notifyContentFactory(
+    postId: string,
+    state: 'PUBLISHED' | 'ERROR',
+    provider: string,
+    channelName: string,
+    releaseURL?: string,
+    errorMessage?: string
+  ) {
+    return this._postService.notifyContentFactory(
+      postId,
+      state,
+      provider,
+      channelName,
+      releaseURL,
+      errorMessage
+    );
+  }
+
+  @ActivityMethod()
   async refreshToken(
     integration: Integration
   ): Promise<false | AuthTokenDetails> {

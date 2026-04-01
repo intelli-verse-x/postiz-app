@@ -14,6 +14,7 @@ import { TikTokDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settin
 import { timer } from '@gitroom/helpers/utils/timer';
 import { Integration } from '@prisma/client';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { readOrFetch } from '@gitroom/helpers/utils/read.or.fetch';
 
 @Rules(
   'TikTok can have one video or one picture or multiple pictures, it cannot be without an attachment'
@@ -506,7 +507,10 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  private buildTikokSourceInfoBody(firstPost: PostDetails<TikTokDto>) {
+  private buildTikokSourceInfoBody(
+    firstPost: PostDetails<TikTokDto>,
+    videoSize?: number
+  ) {
     const isPhoto = (firstPost?.media?.[0]?.path?.indexOf('mp4') || -1) === -1;
 
     if (isPhoto) {
@@ -520,6 +524,17 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
           source: 'PULL_FROM_URL',
           photo_cover_index: 0,
           photo_images: firstPost.media?.map((p) => p.path),
+        },
+      };
+    }
+
+    if (videoSize) {
+      return {
+        source_info: {
+          source: 'FILE_UPLOAD',
+          video_size: videoSize,
+          chunk_size: videoSize,
+          total_chunk_count: 1,
         },
       };
     }
@@ -547,17 +562,35 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     const [firstPost] = postDetails;
     const isPhoto = (firstPost?.media?.[0]?.path?.indexOf('mp4') || -1) === -1;
 
+    let videoBuffer: Buffer | null = null;
+    let sourceInfoBody: Record<string, any>;
+
+    if (!isPhoto && firstPost?.media?.[0]?.path) {
+      try {
+        const data = await readOrFetch(firstPost.media[0].path);
+        videoBuffer = Buffer.from(data);
+        sourceInfoBody = this.buildTikokSourceInfoBody(
+          firstPost,
+          videoBuffer.length
+        );
+      } catch (err) {
+        console.error('[TikTok] FILE_UPLOAD download failed, falling back to PULL_FROM_URL:', err);
+        sourceInfoBody = this.buildTikokSourceInfoBody(firstPost);
+      }
+    } else {
+      sourceInfoBody = this.buildTikokSourceInfoBody(firstPost);
+    }
+
     console.log({
       ...this.buildTikokPostInfoBody(firstPost),
-      ...this.buildTikokSourceInfoBody(firstPost),
+      ...sourceInfoBody,
     });
-    const {
-      data: { publish_id },
-    } = await (
+
+    const initResponse = await (
       await this.fetch(
         `https://open.tiktokapis.com/v2/post/publish${this.postingMethod(
           firstPost.settings.content_posting_method,
-          (firstPost?.media?.[0]?.path?.indexOf('mp4') || -1) === -1
+          isPhoto
         )}`,
         {
           method: 'POST',
@@ -567,11 +600,34 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
           },
           body: JSON.stringify({
             ...this.buildTikokPostInfoBody(firstPost),
-            ...this.buildTikokSourceInfoBody(firstPost),
+            ...sourceInfoBody,
           }),
         }
       )
     ).json();
+
+    const publish_id = initResponse?.data?.publish_id;
+    const upload_url = initResponse?.data?.upload_url;
+
+    if (videoBuffer && upload_url) {
+      const uploadResp = await this.fetch(upload_url, {
+        method: 'PUT',
+        headers: {
+          'Content-Range': `bytes 0-${videoBuffer.length - 1}/${videoBuffer.length}`,
+          'Content-Type': 'video/mp4',
+        },
+        body: videoBuffer,
+      });
+      if (!uploadResp.ok) {
+        const errText = await uploadResp.text().catch(() => '');
+        throw new BadBody(
+          'tiktok-file-upload',
+          JSON.stringify({ status: uploadResp.status }),
+          '',
+          `TikTok FILE_UPLOAD failed (${uploadResp.status}): ${errText}`
+        );
+      }
+    }
 
     const { url, id: videoId } = await this.uploadedVideoSuccess(
       integration.profile!,

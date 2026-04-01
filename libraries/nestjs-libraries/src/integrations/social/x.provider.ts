@@ -316,14 +316,16 @@ export class XProvider extends SocialAbstract implements SocialProvider {
       await Promise.all(
         postDetails.flatMap((p) =>
           p?.media?.flatMap(async (m) => {
+            const cleanPath = m.path.split('?')[0];
+            const mimeType = lookup(cleanPath) || (cleanPath.endsWith('.mp4') ? 'video/mp4' : 'application/octet-stream');
             return {
               id: await this.runInConcurrent(
                 async () =>
                   client.v2.uploadMedia(
-                    m.path.indexOf('mp4') > -1
+                    cleanPath.indexOf('mp4') > -1
                       ? Buffer.from(await readOrFetch(m.path))
                       : await sharp(await readOrFetch(m.path), {
-                          animated: lookup(m.path) === 'image/gif',
+                          animated: mimeType === 'image/gif',
                         })
                           .resize({
                             width: 1000,
@@ -331,7 +333,7 @@ export class XProvider extends SocialAbstract implements SocialProvider {
                           .gif()
                           .toBuffer(),
                     {
-                      media_type: (lookup(m.path) || '') as any,
+                      media_type: mimeType as any,
                     }
                   ),
                 true
