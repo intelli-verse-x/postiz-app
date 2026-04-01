@@ -119,6 +119,92 @@ export class PostsService {
     }
   }
 
+  async getPostForEnrichment(postId: string) {
+    return this._postRepository.getPostById(postId);
+  }
+
+  async enrichPostMetadata(post: Post): Promise<Post> {
+    const settings = JSON.parse(post.settings || '{}');
+    const title: string = settings.title || '';
+    const isBadTitle =
+      !title ||
+      title.length < 15 ||
+      /^short_\d+/.test(title) ||
+      title === '#Shorts';
+
+    if (!isBadTitle) return post;
+
+    const images = JSON.parse(post.image || '[]');
+    const mediaPath: string = images[0]?.path || '';
+    if (!mediaPath) return post;
+
+    let s3Key = '';
+    if (mediaPath.includes('s3-redirect')) {
+      try {
+        const url = new URL(mediaPath);
+        s3Key = url.searchParams.get('key') || '';
+      } catch {
+        return post;
+      }
+    } else if (mediaPath.includes('amazonaws.com')) {
+      try {
+        const stripped = mediaPath.split('?')[0];
+        const parsed = new URL(stripped);
+        s3Key = decodeURIComponent(parsed.pathname.slice(1));
+      } catch {
+        return post;
+      }
+    }
+    if (!s3Key) return post;
+
+    const cfApiBase =
+      process.env.CF_API_URL ||
+      'http://content-factory-api.aicart.svc.cluster.local:8001';
+    try {
+      const resp = await axios.get(`${cfApiBase}/api/media/run-metadata`, {
+        params: { key: s3Key },
+        timeout: 15000,
+      });
+      const meta = resp.data;
+      if (meta?.title && meta.title.length >= 10) {
+        const newTitle = meta.title.replace(/\*\*/g, '').trim();
+        settings.title = newTitle.length > 100
+          ? newTitle.substring(0, 97) + '...'
+          : newTitle;
+      }
+      if (meta?.hook) {
+        const cleanHook = meta.hook.replace(/\*\*/g, '').trim();
+        if (!settings.description || settings.description.length < 20) {
+          settings.description = cleanHook;
+        }
+      }
+      if (meta?.tags?.length) {
+        settings.tags = meta.tags.map((t: string) => ({
+          id: t,
+          value: t,
+          label: t,
+        }));
+      } else if (meta?.seo_keywords?.length) {
+        settings.tags = meta.seo_keywords.map((t: string) => ({
+          id: t,
+          value: t,
+          label: t,
+        }));
+      }
+      if (meta?.hook && (!post.content || post.content.startsWith('**'))) {
+        post.content = meta.hook;
+      }
+      post.settings = JSON.stringify(settings);
+      await this._postRepository.updatePostSettings(post.id, post.settings, post.content);
+      console.log(
+        `[enrichPostMetadata] Enriched post ${post.id}: title="${settings.title}"`
+      );
+    } catch (err) {
+      console.error(`[enrichPostMetadata] Failed for ${post.id}: ${err}`);
+    }
+    return post;
+  }
+
   async notifyContentFactory(
     postId: string,
     state: 'PUBLISHED' | 'ERROR',

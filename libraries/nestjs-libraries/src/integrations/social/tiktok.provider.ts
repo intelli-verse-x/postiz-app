@@ -566,15 +566,26 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     let sourceInfoBody: Record<string, any>;
 
     if (!isPhoto && firstPost?.media?.[0]?.path) {
-      try {
-        const data = await readOrFetch(firstPost.media[0].path);
-        videoBuffer = Buffer.from(data);
+      const mediaUrl = firstPost.media[0].path;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const data = await readOrFetch(mediaUrl);
+          videoBuffer = Buffer.from(data);
+          break;
+        } catch (err) {
+          console.error(`[TikTok] FILE_UPLOAD download attempt ${attempt + 1}/3 failed:`, String(err).substring(0, 200));
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+          }
+        }
+      }
+      if (videoBuffer) {
         sourceInfoBody = this.buildTikokSourceInfoBody(
           firstPost,
           videoBuffer.length
         );
-      } catch (err) {
-        console.error('[TikTok] FILE_UPLOAD download failed, falling back to PULL_FROM_URL:', err);
+      } else {
+        console.error('[TikTok] All FILE_UPLOAD download attempts failed, using PULL_FROM_URL as last resort');
         sourceInfoBody = this.buildTikokSourceInfoBody(firstPost);
       }
     } else {

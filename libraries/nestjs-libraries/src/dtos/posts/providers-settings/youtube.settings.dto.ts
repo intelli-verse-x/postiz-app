@@ -32,6 +32,10 @@ export class YoutubeSettingsDto {
   @Type(() => MediaDto)
   thumbnail?: MediaDto;
 
+  @IsString()
+  @IsOptional()
+  description?: string;
+
   @IsArray()
   @IsOptional()
   @ValidateNested()

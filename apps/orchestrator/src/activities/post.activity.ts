@@ -307,6 +307,14 @@ export class PostActivity {
   }
 
   @ActivityMethod()
+  async enrichPostMetadata(postId: string) {
+    const post = await this._postService.getPostForEnrichment(postId);
+    if (post) {
+      await this._postService.enrichPostMetadata(post);
+    }
+  }
+
+  @ActivityMethod()
   async notifyContentFactory(
     postId: string,
     state: 'PUBLISHED' | 'ERROR',

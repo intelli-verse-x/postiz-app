@@ -36,6 +36,7 @@ const {
   sendWebhooks,
   isCommentable,
   notifyContentFactory,
+  enrichPostMetadata,
 } = proxyActivities<PostActivity>({
   startToCloseTimeout: '10 minute',
   retry: {
@@ -129,6 +130,17 @@ export async function postWorkflowV101({
       : await isCommentable(post.integration);
 
   const postsList = toComment ? postsListBefore : [postsListBefore[0]];
+
+  try {
+    await enrichPostMetadata(postId);
+  } catch {
+    // best-effort; proceed with existing metadata
+  }
+
+  const enrichedPosts = await getPostsList(organizationId, postId);
+  if (enrichedPosts.length > 0) {
+    postsList[0] = toComment ? enrichedPosts[0] : enrichedPosts[0];
+  }
 
   // list of all the saved results
   const postsResults: PostResponse[] = [];

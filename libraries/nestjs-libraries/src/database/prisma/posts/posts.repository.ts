@@ -369,6 +369,16 @@ export class PostsRepository {
     });
   }
 
+  updatePostSettings(id: string, settings: string, content?: string) {
+    return this._post.model.post.update({
+      where: { id },
+      data: {
+        settings,
+        ...(content ? { content } : {}),
+      },
+    });
+  }
+
   updateReleaseId(id: string, orgId: string, releaseId: string) {
     return this._post.model.post.update({
       where: {
