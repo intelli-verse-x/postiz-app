@@ -23,6 +23,8 @@ import axios from 'axios';
 import sharp from 'sharp';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { Readable } from 'stream';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { OpenaiService } from '@gitroom/nestjs-libraries/openai/openai.service';
 dayjs.extend(utc);
 import * as Sentry from '@sentry/nestjs';
@@ -46,6 +48,8 @@ type PostWithConditionals = Post & {
 @Injectable()
 export class PostsService {
   private storage = UploadFactory.createStorage();
+  private _s3Client: S3Client | null = null;
+
   constructor(
     private _postRepository: PostsRepository,
     private _integrationManager: IntegrationManager,
@@ -56,6 +60,64 @@ export class PostsService {
     private _temporalService: TemporalService,
     private _refreshIntegrationService: RefreshIntegrationService
   ) {}
+
+  private getS3Client(): S3Client {
+    if (!this._s3Client) {
+      this._s3Client = new S3Client({
+        region: process.env.AWS_REGION || 'us-east-1',
+      });
+    }
+    return this._s3Client;
+  }
+
+  /**
+   * Resolve media URLs to a fresh, publicly-accessible presigned URL.
+   *
+   * Handles two cases:
+   * 1. Internal CF API redirect URL (s3-redirect) — call it to get the fresh
+   *    S3 presigned URL from the Location header.
+   * 2. Direct S3 presigned URL — regenerate using the pod's own credentials
+   *    to avoid STS session token expiration.
+   */
+  private async refreshS3PresignedUrl(url: string): Promise<string> {
+    if (!url) return url;
+
+    // Case 1: Internal CF API redirect URL
+    if (url.includes('s3-redirect')) {
+      try {
+        const resp = await axios.get(url, {
+          maxRedirects: 0,
+          validateStatus: (s: number) => s === 302 || s === 301,
+        });
+        const location = resp.headers?.location;
+        if (location) return location;
+      } catch (err: any) {
+        if (err?.response?.headers?.location) {
+          return err.response.headers.location;
+        }
+      }
+      return url;
+    }
+
+    // Case 2: Direct S3 presigned URL
+    if (!url.includes('amazonaws.com')) return url;
+    try {
+      const stripped = url.split('?')[0];
+      const parsed = new URL(stripped);
+      const bucketMatch = parsed.hostname.match(
+        /^(.+?)\.s3(?:\.[a-z0-9-]+)?\.amazonaws\.com$/
+      );
+      if (!bucketMatch) return url;
+      const bucket = bucketMatch[1];
+      const key = decodeURIComponent(parsed.pathname.slice(1));
+      const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+      return await getSignedUrl(this.getS3Client(), command, {
+        expiresIn: 3600,
+      });
+    } catch {
+      return url;
+    }
+  }
 
   searchForMissingThreeHoursPosts() {
     return this._postRepository.searchForMissingThreeHoursPosts();
@@ -324,37 +386,45 @@ export class PostsService {
   async updateMedia(id: string, imagesList: any[], convertToJPEG = false) {
     try {
       let imageUpdateNeeded = false;
-      const getImageList = await Promise.all(
-        (
-          await Promise.all(
-            (imagesList || []).map(async (p: any) => {
-              if (!p.path && p.id) {
-                imageUpdateNeeded = true;
-                return this._mediaService.getMediaById(p.id);
-              }
+      const resolvedMedia = await Promise.all(
+        (imagesList || []).map(async (p: any) => {
+          if (!p.path && p.id) {
+            imageUpdateNeeded = true;
+            return this._mediaService.getMediaById(p.id);
+          }
+          return p;
+        })
+      );
 
-              return p;
-            })
-          )
-        )
-          .map((m) => {
-            return {
-              ...m,
-              url:
-                m.path.indexOf('http') === -1
-                  ? process.env.FRONTEND_URL +
-                    '/' +
-                    process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY +
-                    m.path
-                  : m.path,
-              type: 'image',
-              path:
-                m.path.indexOf('http') === -1
-                  ? process.env.UPLOAD_DIRECTORY + m.path
-                  : m.path,
-            };
-          })
-          .map(async (m) => {
+      const withUrls = await Promise.all(
+        resolvedMedia.map(async (m) => {
+          let effectivePath = m.path;
+          if (
+            effectivePath.indexOf('http') !== -1 &&
+            effectivePath.includes('s3.amazonaws.com')
+          ) {
+            effectivePath = await this.refreshS3PresignedUrl(effectivePath);
+          }
+          return {
+            ...m,
+            url:
+              effectivePath.indexOf('http') === -1
+                ? process.env.FRONTEND_URL +
+                  '/' +
+                  process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY +
+                  effectivePath
+                : effectivePath,
+            type: 'image',
+            path:
+              effectivePath.indexOf('http') === -1
+                ? process.env.UPLOAD_DIRECTORY + effectivePath
+                : effectivePath,
+          };
+        })
+      );
+
+      const getImageList = await Promise.all(
+        withUrls.map(async (m) => {
             if (!convertToJPEG) {
               return m;
             }
