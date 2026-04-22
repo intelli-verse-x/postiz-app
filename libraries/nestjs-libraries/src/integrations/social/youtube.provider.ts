@@ -50,7 +50,7 @@ const clientAndYoutube = () => {
 
 @Rules('YouTube must have on video attachment, it cannot be empty')
 export class YoutubeProvider extends SocialAbstract implements SocialProvider {
-  override maxConcurrentJob = 200; // YouTube has strict upload quotas
+  override maxConcurrentJob = 3; // YouTube API allows ~6 video uploads/day per project
   identifier = 'youtube';
   name = 'YouTube';
   isBetweenSteps = true;
@@ -73,7 +73,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
 
   override handleErrors(body: string):
     | {
-        type: 'refresh-token' | 'bad-body';
+        type: 'refresh-token' | 'bad-body' | 'retry';
         value: string;
       }
     | undefined {
@@ -93,11 +93,11 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       };
     }
 
-    if (body.includes('uploadLimitExceeded')) {
+    if (body.includes('uploadLimitExceeded') || body.includes('quotaExceeded')) {
       return {
-        type: 'bad-body',
+        type: 'retry',
         value:
-          'You have reached your daily upload limit, please try again tomorrow.',
+          'YouTube daily quota exceeded, will retry automatically.',
       };
     }
 

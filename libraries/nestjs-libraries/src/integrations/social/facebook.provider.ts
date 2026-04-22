@@ -159,6 +159,31 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
   }
 
   async refreshToken(refresh_token: string): Promise<AuthTokenDetails> {
+    try {
+      const response = await (
+        await fetch(
+          `https://graph.facebook.com/v20.0/oauth/access_token` +
+            `?grant_type=fb_exchange_token` +
+            `&client_id=${process.env.FACEBOOK_APP_ID}` +
+            `&client_secret=${process.env.FACEBOOK_APP_SECRET}` +
+            `&fb_exchange_token=${refresh_token}`
+        )
+      ).json();
+
+      if (response.access_token) {
+        return {
+          refreshToken: response.access_token,
+          expiresIn: response.expires_in || 5184000,
+          accessToken: response.access_token,
+          id: '',
+          name: '',
+          picture: '',
+          username: '',
+        };
+      }
+    } catch {
+      // fall through to empty return
+    }
     return {
       refreshToken: '',
       expiresIn: 0,

@@ -228,7 +228,7 @@ export class PostsService {
           error: errorMessage || null,
           timestamp: new Date().toISOString(),
         },
-        { timeout: 10000 }
+        { timeout: 30000 }
       );
     } catch (err) {
       console.error(

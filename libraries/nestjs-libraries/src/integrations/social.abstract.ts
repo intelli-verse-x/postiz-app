@@ -72,7 +72,8 @@ export abstract class SocialAbstract {
 
   async runInConcurrent<T>(
     func: (...args: any[]) => Promise<T>,
-    ignoreConcurrency?: boolean
+    ignoreConcurrency?: boolean,
+    retryAttempt = 0
   ) {
     let value: any;
     try {
@@ -83,6 +84,11 @@ export abstract class SocialAbstract {
     }
 
     if (value && value?.err && value?.value) {
+      if (value.type === 'retry' && retryAttempt < 3) {
+        const delay = Math.min(30000 * Math.pow(2, retryAttempt), 300000);
+        await timer(delay);
+        return this.runInConcurrent(func, ignoreConcurrency, retryAttempt + 1);
+      }
       if (value.type === 'refresh-token') {
         throw new RefreshToken(
           '',
