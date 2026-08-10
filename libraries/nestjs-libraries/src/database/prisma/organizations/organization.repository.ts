@@ -258,7 +258,10 @@ export class OrganizationRepository {
   }
 
   async createOrgAndUser(
-    body: Omit<CreateOrgUserDto, 'providerToken'> & { providerId?: string },
+    body: Omit<CreateOrgUserDto, 'providerToken'> & {
+      providerId?: string;
+      appId?: string;
+    },
     hasEmail: boolean,
     ip: string,
     userAgent: string
@@ -266,6 +269,7 @@ export class OrganizationRepository {
     return this._organization.model.organization.create({
       data: {
         name: body.company,
+        ...(body.appId ? { appId: body.appId } : {}),
         apiKey: AuthService.fixedEncryption(makeId(20)),
         allowTrial: true,
         isTrailing: true,
@@ -291,12 +295,43 @@ export class OrganizationRepository {
       },
       select: {
         id: true,
+        appId: true,
+        apiKey: true,
+        name: true,
         users: {
           select: {
             user: true,
           },
         },
       },
+    });
+  }
+
+  getOrgByAppId(appId: string) {
+    return this._organization.model.organization.findUnique({
+      where: { appId },
+      include: {
+        users: {
+          where: { role: Role.SUPERADMIN },
+          take: 1,
+          select: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  async setOrgAppId(orgId: string, appId: string) {
+    return this._organization.model.organization.update({
+      where: { id: orgId },
+      data: { appId },
+      select: { id: true, name: true, appId: true, apiKey: true },
     });
   }
 

@@ -259,10 +259,35 @@ export class UsersController {
   }
 
   @Post('/change-org')
-  changeOrg(
+  async changeOrg(
+    @GetUserFromRequest() user: User,
+    @Req() req: Request,
     @Body('id') id: string,
     @Res({ passthrough: true }) response: Response
   ) {
+    const membership = (await this._orgService.getOrgsByUserId(user.id)).find(
+      (org) => org.id === id && !org.users[0]?.disabled
+    );
+    if (!membership) {
+      throw new HttpForbiddenException();
+    }
+
+    // When brand-scoped, refuse switching to a different appId org
+    const appIdRaw =
+      (req.headers['x-app-id'] as string) ||
+      (req.cookies?.appid as string) ||
+      '';
+    const appId = String(appIdRaw || '')
+      .trim()
+      .toLowerCase();
+    if (
+      appId &&
+      (membership as { appId?: string | null }).appId &&
+      (membership as { appId?: string | null }).appId !== appId
+    ) {
+      throw new HttpForbiddenException();
+    }
+
     response.cookie('showorg', id, {
       domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
       ...(!process.env.NOT_SECURED

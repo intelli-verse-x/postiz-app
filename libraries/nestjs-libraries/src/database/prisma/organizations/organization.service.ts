@@ -6,8 +6,12 @@ import { AddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/add.te
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import dayjs from 'dayjs';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
-import { Organization, ShortLinkPreference } from '@prisma/client';
-import { AutopostService } from '@gitroom/nestjs-libraries/database/prisma/autopost/autopost.service';
+import { Organization, Provider, ShortLinkPreference } from '@prisma/client';
+import {
+  isValidPostizAppId,
+  normalizeAppId,
+} from '@gitroom/nestjs-libraries/app-id/app-ids';
+import { ProvisionBrandDto } from '@gitroom/nestjs-libraries/dtos/brands/provision.brand.dto';
 
 @Injectable()
 export class OrganizationService {
@@ -16,7 +20,10 @@ export class OrganizationService {
     private _notificationsService: NotificationService
   ) {}
   async createOrgAndUser(
-    body: Omit<CreateOrgUserDto, 'providerToken'> & { providerId?: string },
+    body: Omit<CreateOrgUserDto, 'providerToken'> & {
+      providerId?: string;
+      appId?: string;
+    },
     ip: string,
     userAgent: string
   ) {
@@ -51,6 +58,64 @@ export class OrganizationService {
 
   getOrgByApiKey(api: string) {
     return this._organizationRepository.getOrgByApiKey(api);
+  }
+
+  getOrgByAppId(appId: string) {
+    return this._organizationRepository.getOrgByAppId(normalizeAppId(appId));
+  }
+
+  /**
+   * Idempotent brand onboard: one Organization per appId.
+   * Returns existing org if appId already provisioned.
+   */
+  async provisionBrand(
+    dto: ProvisionBrandDto,
+    ip = '0.0.0.0',
+    userAgent = 'provision'
+  ) {
+    const appId = normalizeAppId(dto.appId);
+    if (!isValidPostizAppId(appId)) {
+      throw new Error(`invalid_app_id:${appId}`);
+    }
+
+    const existing = await this.getOrgByAppId(appId);
+    if (existing) {
+      if (!existing.apiKey) {
+        await this.updateApiKey(existing.id);
+      }
+      const refreshed = await this.getOrgByAppId(appId);
+      return {
+        created: false,
+        orgId: refreshed!.id,
+        appId: refreshed!.appId,
+        name: refreshed!.name,
+        apiKey: refreshed!.apiKey,
+        ownerEmail: refreshed!.users?.[0]?.user?.email || dto.ownerEmail,
+      };
+    }
+
+    const password = dto.password || makeId(24);
+    const created = await this.createOrgAndUser(
+      {
+        company: dto.label,
+        email: dto.ownerEmail.toLowerCase().trim(),
+        password,
+        provider: Provider.LOCAL,
+        appId,
+      },
+      ip,
+      userAgent
+    );
+
+    return {
+      created: true,
+      orgId: created.id,
+      appId: created.appId,
+      name: created.name,
+      apiKey: created.apiKey,
+      ownerEmail: dto.ownerEmail.toLowerCase().trim(),
+      ownerPassword: password,
+    };
   }
 
   getUserOrg(id: string) {
