@@ -36,9 +36,18 @@ SELECT id, name, "appId" FROM "Organization";
 | 1 Schema | Done (code + SQL) | `Organization.appId` unique — **apply `pnpm prisma-db-push` or SQL on prod** |
 | 2 Provision | Done (code) | `POST /internal/brands/provision` + `GET /internal/brands/:appId` |
 | 3 Session bind | Done (code) | `x-app-id` / `appid` forces org; `change-org` membership + appId check |
-| 4 CF → Postiz | Pending | Push with appId |
+| 3b User appId | Done (code) | Self-serve register + login backfill `appId = user_<userId>` |
+| 4 CF → Postiz | Deferred | Brand env keys not required for embed/self-serve path |
 | 5 Admin + MCP | Pending | `postiz__appId` hard bind |
 | 6 Hardening | Pending | Cutover / runbook |
+
+## Self-serve user appId (3b)
+
+On **register** (`createOrgAndUser` without brand `appId`): set `Organization.appId = user_<postizUserId>`.
+
+On **authenticated request** (login session): if org `appId` is null, backfill once. Never overwrite an existing brand or user `appId`.
+
+Old accounts keep all posts/channels; they only gain a label.
 
 ## Provision API (Phase 2)
 
