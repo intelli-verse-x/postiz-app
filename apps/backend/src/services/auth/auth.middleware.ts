@@ -88,10 +88,30 @@ export class AuthMiddleware implements NestMiddleware {
       const organization = (
         await this._organizationService.getOrgsByUserId(user.id)
       ).filter((f) => !f.users[0].disabled);
-      const setOrg =
+
+      // Brand scope: Admin / Content Factory pass x-app-id or cookie appid
+      const appIdRaw =
+        (req.headers['x-app-id'] as string) ||
+        (req.cookies?.appid as string) ||
+        '';
+      const appId = String(appIdRaw || '')
+        .trim()
+        .toLowerCase();
+
+      let setOrg =
         organization.find((org) => org.id === orgHeader) || organization[0];
 
-      if (!organization) {
+      if (appId) {
+        const byApp = organization.find(
+          (org) => (org as { appId?: string | null }).appId === appId
+        );
+        if (!byApp) {
+          throw new HttpForbiddenException();
+        }
+        setOrg = byApp;
+      }
+
+      if (!organization?.length || !setOrg) {
         throw new HttpForbiddenException();
       }
 

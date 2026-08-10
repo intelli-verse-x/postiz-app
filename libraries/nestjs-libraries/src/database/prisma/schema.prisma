@@ -11,6 +11,8 @@ datasource db {
 model Organization {
   id                  String               @id @default(uuid())
   name                String
+  /// IntelliVerseX brand / app scope (foundrly, quizverse, …). One org per appId.
+  appId               String?              @unique
   description         String?
   apiKey              String?
   paymentId           String?
@@ -47,6 +49,7 @@ model Organization {
   @@index([apiKey])
   @@index([streakSince])
   @@index([paymentId])
+  @@index([appId])
 }
 
 model Tags {

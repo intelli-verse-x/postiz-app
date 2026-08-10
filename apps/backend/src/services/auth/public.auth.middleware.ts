@@ -56,6 +56,23 @@ export class PublicAuthMiddleware implements NestMiddleware {
         // @ts-ignore
         req.org = { ...org, users: [{ users: { role: 'SUPERADMIN' } }] };
       }
+
+      // Optional brand pin: refuse API key / OAuth for a different appId
+      const appIdRaw =
+        (req.headers['x-app-id'] as string) ||
+        (req.cookies?.appid as string) ||
+        '';
+      const appId = String(appIdRaw || '')
+        .trim()
+        .toLowerCase();
+      // @ts-ignore
+      const orgAppId = req.org?.appId as string | null | undefined;
+      if (appId && orgAppId && orgAppId !== appId) {
+        res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ msg: 'API key does not match x-app-id' });
+        return;
+      }
     } catch (err) {
       throw new HttpForbiddenException();
     }
