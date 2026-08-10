@@ -10,6 +10,7 @@ import { Organization, Provider, ShortLinkPreference } from '@prisma/client';
 import {
   isValidPostizAppId,
   normalizeAppId,
+  userAppId,
 } from '@gitroom/nestjs-libraries/app-id/app-ids';
 import { ProvisionBrandDto } from '@gitroom/nestjs-libraries/dtos/brands/provision.brand.dto';
 
@@ -27,12 +28,46 @@ export class OrganizationService {
     ip: string,
     userAgent: string
   ) {
-    return this._organizationRepository.createOrgAndUser(
+    const created = await this._organizationRepository.createOrgAndUser(
       body,
       this._notificationsService.hasEmailProvider(),
       ip,
       userAgent
     );
+
+    // Self-serve (no brand appId): stamp user_<userId> so orgs never merge.
+    if (!created.appId && created.users?.[0]?.user?.id) {
+      const stamped = await this.ensureUserAppId(
+        created.id,
+        created.users[0].user.id
+      );
+      return { ...created, appId: stamped.appId };
+    }
+
+    return created;
+  }
+
+  /**
+   * If org has no appId yet, set user_<userId>. Never overwrites an existing
+   * brand or user appId (old accounts keep data; only get a label).
+   */
+  async ensureUserAppId(orgId: string, userId: string) {
+    const org = await this._organizationRepository.getOrgById(orgId);
+    if (!org) {
+      throw new Error(`org_not_found:${orgId}`);
+    }
+    if (org.appId) {
+      return org;
+    }
+
+    const primary = userAppId(userId);
+    try {
+      return await this._organizationRepository.setOrgAppId(orgId, primary);
+    } catch {
+      // Unique race: fall back to user_<userId>_<orgShort>
+      const fallback = `${primary}_${String(orgId).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}`;
+      return this._organizationRepository.setOrgAppId(orgId, fallback);
+    }
   }
 
   async getCount() {

@@ -119,6 +119,21 @@ export class AuthMiddleware implements NestMiddleware {
         await this._organizationService.updateApiKey(setOrg.id);
       }
 
+      // Old accounts: backfill appId = user_<userId> once (never overwrites brand)
+      if (!(setOrg as { appId?: string | null }).appId) {
+        try {
+          const stamped = await this._organizationService.ensureUserAppId(
+            setOrg.id,
+            user.id
+          );
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-expect-error
+          setOrg = { ...setOrg, appId: stamped.appId };
+        } catch {
+          // Non-fatal: org still usable without appId label
+        }
+      }
+
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-expect-error
       req.user = user;
