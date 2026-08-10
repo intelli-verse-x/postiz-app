@@ -102,6 +102,7 @@ export class OrganizationService {
         password,
         provider: Provider.LOCAL,
         appId,
+        datafast_visitor_id: '',
       },
       ip,
       userAgent
