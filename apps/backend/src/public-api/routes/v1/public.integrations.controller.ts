@@ -328,6 +328,7 @@ export class PublicIntegrationsController {
   async getIntegrationUrl(
     @Param('integration') integration: string,
     @Query('refresh') refresh: string,
+    @Query('redirectUrl') redirectUrl: string,
     @GetOrgFromRequest() org: Organization
   ) {
     Sentry.metrics.count('public_api-request', 1);
@@ -362,8 +363,21 @@ export class PublicIntegrationsController {
       await ioRedis.set(`organization:${state}`, org.id, 'EX', 3600);
       await ioRedis.set(`login:${state}`, codeVerifier, 'EX', 3600);
 
+      if (redirectUrl) {
+        const allowedOrigins = (process.env.CONTENTX_STUDIO_ORIGINS || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const originOk = allowedOrigins.some((o) => redirectUrl.startsWith(o));
+        if (!originOk) {
+          throw new HttpException({ msg: 'redirectUrl not allowed' }, 400);
+        }
+        await ioRedis.set(`redirect:${state}`, redirectUrl, 'EX', 3600);
+      }
+
       return { url };
     } catch (err) {
+      if (err instanceof HttpException) throw err;
       throw new HttpException({ msg: 'Failed to generate auth URL' }, 500);
     }
   }
