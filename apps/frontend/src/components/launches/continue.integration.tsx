@@ -101,6 +101,34 @@ export const ContinueIntegration: FC<{
     (async () => {
       const timezone = String(dayjs.tz().utcOffset());
 
+      // Replay guard: OAuth states are single-use. If this page reloads after a
+      // successful connect (e.g. DevTools device-mode reload), re-POSTing the
+      // consumed state returns "Invalid state" and used to strand the spinner.
+      const stateKey = `postiz_done:${modifiedParams.state || ''}`;
+      try {
+        const prev = modifiedParams.state
+          ? sessionStorage.getItem(stateKey)
+          : null;
+        if (prev) {
+          if (prev.startsWith('http') || prev.startsWith('/')) {
+            window.location.replace(prev);
+          } else {
+            setSuccessState({
+              message:
+                'This channel was already connected. You can close this window.',
+            });
+          }
+          return;
+        }
+      } catch {}
+      const markDone = (dest?: string) => {
+        try {
+          if (modifiedParams.state) {
+            sessionStorage.setItem(stateKey, dest || 'done');
+          }
+        } catch {}
+      };
+
       // Try public endpoint first (handles both public and fallback scenarios)
       let data = await fetch(`/integrations/social-connect/${provider}`, {
         method: 'POST',
@@ -190,6 +218,7 @@ export const ContinueIntegration: FC<{
           // Bounce to Studio with pages + state for Studio picker (Phase B)
           const pagesB64 = btoa(JSON.stringify(pages || []));
           const dest = `${returnURL}?step=pick&integration_id=${encodeURIComponent(id)}&state=${encodeURIComponent(modifiedParams.state || '')}&pages=${encodeURIComponent(pagesB64)}&provider=${encodeURIComponent(provider)}`;
+          markDone(dest);
           window.location.assign(dest);
           return;
         }
@@ -202,6 +231,8 @@ export const ContinueIntegration: FC<{
         });
         return;
       }
+
+      markDone(returnURL || undefined);
 
       // Popup flow (non-picker): postMessage the opener then close
       if (typeof window !== 'undefined' && window.opener) {
