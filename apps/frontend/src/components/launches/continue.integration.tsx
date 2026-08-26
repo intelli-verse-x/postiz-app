@@ -44,7 +44,10 @@ export const ContinueIntegration: FC<{
     (path: string, returnURL: string | undefined, successMessage: string) => {
       if (returnURL) {
         const params = path.includes('?') ? path.split('?')[1] : '';
-        const dest = params ? `${returnURL}?${params}` : returnURL;
+        // returnURL may already carry a query string (Studio callback does) —
+        // appending with '?' again would corrupt it.
+        const sep = returnURL.includes('?') ? '&' : '?';
+        const dest = params ? `${returnURL}${sep}${params}` : returnURL;
         // Use location.assign for cross-origin Studio URLs; router.push only works same-origin
         if (dest.startsWith('http://') || dest.startsWith('https://')) {
           window.location.assign(dest);
@@ -227,7 +230,10 @@ export const ContinueIntegration: FC<{
             pagesBin += String.fromCharCode(b);
           });
           const pagesB64 = btoa(pagesBin);
-          const dest = `${returnURL}?step=pick&integration_id=${encodeURIComponent(id)}&state=${encodeURIComponent(modifiedParams.state || '')}&pages=${encodeURIComponent(pagesB64)}&provider=${encodeURIComponent(provider)}`;
+          // returnURL already carries Studio's own query params — append with
+          // '&' or the whole step=pick payload gets swallowed by the last param.
+          const pickSep = returnURL.includes('?') ? '&' : '?';
+          const dest = `${returnURL}${pickSep}step=pick&integration_id=${encodeURIComponent(id)}&state=${encodeURIComponent(modifiedParams.state || '')}&pages=${encodeURIComponent(pagesB64)}&provider=${encodeURIComponent(provider)}`;
           markDone(dest);
           window.location.assign(dest);
           return;
