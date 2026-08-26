@@ -126,8 +126,6 @@ export class AuthMiddleware implements NestMiddleware {
             setOrg.id,
             user.id
           );
-          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-          // @ts-expect-error
           setOrg = { ...setOrg, appId: stamped.appId };
         } catch {
           // Non-fatal: org still usable without appId label
