@@ -216,8 +216,17 @@ export const ContinueIntegration: FC<{
       // If it's a two-step provider, show the selection UI inline
       if (inBetweenSteps && !searchParams.refresh) {
         if (returnURL) {
-          // Bounce to Studio with pages + state for Studio picker (Phase B)
-          const pagesB64 = btoa(JSON.stringify(pages || []));
+          // Bounce to Studio with pages + state for Studio picker (Phase B).
+          // btoa() alone throws on non-Latin1 (e.g. Hindi/emoji channel
+          // names), so base64-encode the UTF-8 bytes instead.
+          const pagesBytes = new TextEncoder().encode(
+            JSON.stringify(pages || [])
+          );
+          let pagesBin = '';
+          pagesBytes.forEach((b) => {
+            pagesBin += String.fromCharCode(b);
+          });
+          const pagesB64 = btoa(pagesBin);
           const dest = `${returnURL}?step=pick&integration_id=${encodeURIComponent(id)}&state=${encodeURIComponent(modifiedParams.state || '')}&pages=${encodeURIComponent(pagesB64)}&provider=${encodeURIComponent(provider)}`;
           markDone(dest);
           window.location.assign(dest);
