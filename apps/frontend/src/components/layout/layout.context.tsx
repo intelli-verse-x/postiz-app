@@ -29,7 +29,11 @@ function LayoutContextInner(params: { children: ReactNode }) {
       if (
         typeof window !== 'undefined' &&
         (window.location.href.includes('/p/') ||
-          window.location.pathname.startsWith('/provider/'))
+          window.location.pathname.startsWith('/provider/') ||
+          // White-label OAuth continue page must handle its own errors —
+          // the 406 dialog path below returns false, which never resolves
+          // the fetch promise and strands the page on its spinner.
+          window.location.pathname.startsWith('/integrations/social'))
       ) {
         return true;
       }
