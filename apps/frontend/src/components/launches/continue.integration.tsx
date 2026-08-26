@@ -206,9 +206,15 @@ export const ContinueIntegration: FC<{
       // Popup flow (non-picker): postMessage the opener then close
       if (typeof window !== 'undefined' && window.opener) {
         try {
+          // Use known Studio origins for security; fall back to '*' if not configured
+          const studioOrigins = (process.env.NEXT_PUBLIC_CONTENTX_STUDIO_ORIGINS || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+          const targetOrigin = studioOrigins[0] || '*';
           window.opener.postMessage(
             { type: 'postiz-connected', provider, integrationId: id },
-            '*'
+            targetOrigin
           );
         } catch {}
         window.close();
