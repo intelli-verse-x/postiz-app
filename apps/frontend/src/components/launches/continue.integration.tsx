@@ -43,14 +43,17 @@ export const ContinueIntegration: FC<{
   const navigateOrShow = useCallback(
     (path: string, returnURL: string | undefined, successMessage: string) => {
       if (returnURL) {
-        // If returnURL exists, always redirect to it with the path params
         const params = path.includes('?') ? path.split('?')[1] : '';
-        push(params ? `${returnURL}?${params}` : returnURL);
+        const dest = params ? `${returnURL}?${params}` : returnURL;
+        // Use location.assign for cross-origin Studio URLs; router.push only works same-origin
+        if (dest.startsWith('http://') || dest.startsWith('https://')) {
+          window.location.assign(dest);
+        } else {
+          push(dest);
+        }
       } else if (logged) {
-        // If logged in without returnURL, use normal navigation
         push(path);
       } else {
-        // If not logged in without returnURL, show success inline
         setSuccessState({ message: successMessage });
       }
     },
@@ -183,12 +186,38 @@ export const ContinueIntegration: FC<{
 
       // If it's a two-step provider, show the selection UI inline
       if (inBetweenSteps && !searchParams.refresh) {
+        if (returnURL) {
+          // Bounce to Studio with pages + state for Studio picker (Phase B)
+          const pagesB64 = btoa(JSON.stringify(pages || []));
+          const dest = `${returnURL}?step=pick&integration_id=${encodeURIComponent(id)}&state=${encodeURIComponent(modifiedParams.state || '')}&pages=${encodeURIComponent(pagesB64)}&provider=${encodeURIComponent(provider)}`;
+          window.location.assign(dest);
+          return;
+        }
+        // No returnURL — show Postiz picker as before
         setTwoStepState({
           integrationId: id,
           onboarding,
           pages: pages || [],
           returnURL,
         });
+        return;
+      }
+
+      // Popup flow (non-picker): postMessage the opener then close
+      if (typeof window !== 'undefined' && window.opener) {
+        try {
+          // Use known Studio origins for security; fall back to '*' if not configured
+          const studioOrigins = (process.env.NEXT_PUBLIC_CONTENTX_STUDIO_ORIGINS || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+          const targetOrigin = studioOrigins[0] || '*';
+          window.opener.postMessage(
+            { type: 'postiz-connected', provider, integrationId: id },
+            targetOrigin
+          );
+        } catch {}
+        window.close();
         return;
       }
 
