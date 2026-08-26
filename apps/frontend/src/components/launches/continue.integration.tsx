@@ -100,6 +100,7 @@ export const ContinueIntegration: FC<{
   useEffect(() => {
     (async () => {
       const timezone = String(dayjs.tz().utcOffset());
+      try {
 
       // Replay guard: OAuth states are single-use. If this page reloads after a
       // successful connect (e.g. DevTools device-mode reload), re-POSTing the
@@ -249,6 +250,21 @@ export const ContinueIntegration: FC<{
           );
         } catch {}
         window.close();
+        // Google/X send COOP headers that make window.close() a silent no-op
+        // for this popup — without this fallback the tab strands on the
+        // spinner even though the channel connected successfully.
+        window.setTimeout(() => {
+          if (!window.closed) {
+            if (returnURL) {
+              window.location.assign(returnURL);
+            } else {
+              setSuccessState({
+                message:
+                  'Your channel has been connected. You can close this window.',
+              });
+            }
+          }
+        }, 400);
         return;
       }
 
@@ -259,6 +275,14 @@ export const ContinueIntegration: FC<{
         returnURL,
         'Channel Updated'
       );
+      } catch (err: any) {
+        // Never strand the spinner: surface anything unexpected (network
+        // failure, malformed response, blocked storage) as the error screen.
+        setErrorMessage(
+          (err && err.message) || 'Something went wrong while connecting.'
+        );
+        setError(true);
+      }
     })();
   }, []);
 
