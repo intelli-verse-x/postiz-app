@@ -37,7 +37,6 @@ export const PlatformAnalytics = () => {
 
   const [current, setCurrent] = useState(0);
   const [key, setKey] = useState(7);
-  const [refresh, setRefresh] = useState(false);
   const [collapseMenu, setCollapseMenu] = useCookie('collapseMenu', '0');
   const toaster = useToaster();
   const load = useCallback(async () => {
@@ -215,10 +214,6 @@ export const PlatformAnalytics = () => {
                   );
                   return;
                 }
-                setRefresh(true);
-                setTimeout(() => {
-                  setRefresh(false);
-                }, 10);
                 setCurrent(index);
               }}
               className={clsx(
@@ -291,8 +286,12 @@ export const PlatformAnalytics = () => {
               </Select>
             </div>
             <div className="flex-1">
-              {!!keys && !!currentIntegration && !refresh && (
-                <RenderAnalytics integration={currentIntegration} date={keys} />
+              {!!keys && !!currentIntegration && (
+                <RenderAnalytics
+                  key={`${currentIntegration.id}-${keys}`}
+                  integration={currentIntegration}
+                  date={keys}
+                />
               )}
             </div>
           </div>

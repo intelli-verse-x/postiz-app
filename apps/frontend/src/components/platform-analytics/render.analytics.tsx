@@ -1,4 +1,4 @@
-import { FC, useCallback, useMemo, useState } from 'react';
+import { FC, useCallback, useMemo } from 'react';
 import { Integration } from '@prisma/client';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
@@ -56,7 +56,7 @@ const AnalyticsCard: FC<{
   const colorVariants = ['purple', 'green', 'blue'] as const;
   const color = colorVariants[index % colorVariants.length];
 
-  const hasDataPoints = item.data.length >= 1;
+  const hasDataPoints = (item.data?.length ?? 0) >= 1;
 
   return (
     <div className="group relative">
@@ -172,27 +172,28 @@ export const RenderAnalytics: FC<{
   date: number;
 }> = (props) => {
   const { integration, date } = props;
-  const [loading, setLoading] = useState(true);
   const fetch = useFetch();
 
   const load = useCallback(async () => {
-    setLoading(true);
-    const load = (
-      await fetch(`/analytics/${integration.id}?date=${date}`)
-    ).json();
-    setLoading(false);
-    return load;
-  }, [integration, date]);
+    const response = await fetch(
+      `/analytics/${integration.id}?date=${date}`
+    );
+    return (await response.json()) as AnalyticsDataItem[];
+  }, [fetch, integration.id, date]);
 
-  const { data } = useSWR(`/analytics-${integration?.id}-${date}`, load, {
-    refreshInterval: 0,
-    refreshWhenHidden: false,
-    revalidateOnFocus: false,
-    revalidateOnReconnect: false,
-    revalidateIfStale: false,
-    refreshWhenOffline: false,
-    revalidateOnMount: true,
-  });
+  const { data, isLoading, isValidating } = useSWR(
+    `/analytics-${integration.id}-${date}`,
+    load,
+    {
+      refreshInterval: 0,
+      refreshWhenHidden: false,
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      revalidateIfStale: false,
+      refreshWhenOffline: false,
+      revalidateOnMount: true,
+    }
+  );
 
   const refreshChannel = useCallback(
     (
@@ -211,16 +212,17 @@ export const RenderAnalytics: FC<{
         ).json();
         window.location.href = url;
       },
-    []
+    [fetch]
   );
-
-  const t = useT();
 
   const totals = useMemo(() => {
     return data?.map((p: AnalyticsDataItem) => {
+      const points = p?.data ?? [];
       const value =
-        (p?.data.reduce((acc: number, curr: { total: number }) => acc + curr.total, 0) || 0) /
-        (p.average ? p.data.length : 1);
+        (points.reduce(
+          (acc: number, curr: { total: number }) => acc + Number(curr.total || 0),
+          0
+        ) || 0) / (p.average ? Math.max(points.length, 1) : 1);
       if (p.average) {
         return value.toFixed(2) + '%';
       }
@@ -228,7 +230,9 @@ export const RenderAnalytics: FC<{
     });
   }, [data]);
 
-  if (loading) {
+  // Prefer SWR loading flags so remount/dedupe cannot leave a local spinner stuck
+  // after Network already returned 200.
+  if (!data && (isLoading || isValidating)) {
     return (
       <div className="flex items-center justify-center py-[48px]">
         <LoadingComponent />
@@ -244,8 +248,8 @@ export const RenderAnalytics: FC<{
       {data?.map((item: AnalyticsDataItem, index: number) => (
         <AnalyticsCard
           key={`analytics-${index}`}
-          item={item}
-          total={totals[index]}
+          item={{ ...item, data: item.data ?? [] }}
+          total={totals?.[index] ?? '0'}
           index={index}
         />
       ))}
