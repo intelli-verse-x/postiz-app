@@ -37,6 +37,8 @@ export const PlatformAnalytics = () => {
 
   const [current, setCurrent] = useState(0);
   const [key, setKey] = useState(7);
+  // Forces a fresh analytics fetch on every channel click (avoids SWR joining a hung promise).
+  const [loadNonce, setLoadNonce] = useState(0);
   const [collapseMenu, setCollapseMenu] = useCookie('collapseMenu', '0');
   const toaster = useToaster();
   const load = useCallback(async () => {
@@ -215,6 +217,7 @@ export const PlatformAnalytics = () => {
                   return;
                 }
                 setCurrent(index);
+                setLoadNonce((n) => n + 1);
               }}
               className={clsx(
                 'flex gap-[12px] items-center group/profile justify-center hover:bg-boxHover rounded-e-[8px]',
@@ -288,9 +291,10 @@ export const PlatformAnalytics = () => {
             <div className="flex-1">
               {!!keys && !!currentIntegration && (
                 <RenderAnalytics
-                  key={`${currentIntegration.id}-${keys}`}
+                  key={`${currentIntegration.id}-${keys}-${loadNonce}`}
                   integration={currentIntegration}
                   date={keys}
+                  loadNonce={loadNonce}
                 />
               )}
             </div>
