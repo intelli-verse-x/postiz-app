@@ -170,30 +170,39 @@ const EmptyState: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 export const RenderAnalytics: FC<{
   integration: Integration;
   date: number;
+  /** Bumped on every channel click so a hung SWR key cannot strand the spinner. */
+  loadNonce?: number;
 }> = (props) => {
-  const { integration, date } = props;
+  const { integration, date, loadNonce = 0 } = props;
   const fetch = useFetch();
+  const t = useT();
 
   const load = useCallback(async () => {
     const response = await fetch(
       `/analytics/${integration.id}?date=${date}`
     );
-    return (await response.json()) as AnalyticsDataItem[];
+    if (!response.ok) {
+      throw new Error(`Analytics request failed (${response.status})`);
+    }
+    const body = (await response.json()) as AnalyticsDataItem[];
+    return Array.isArray(body) ? body : [];
   }, [fetch, integration.id, date]);
 
-  const { data, isLoading, isValidating } = useSWR(
-    `/analytics-${integration.id}-${date}`,
-    load,
-    {
-      refreshInterval: 0,
-      refreshWhenHidden: false,
-      revalidateOnFocus: false,
-      revalidateOnReconnect: false,
-      revalidateIfStale: false,
-      refreshWhenOffline: false,
-      revalidateOnMount: true,
-    }
-  );
+  // Include loadNonce in the key so each channel click starts a fresh request
+  // instead of joining a previously hung/deduped promise (no Network call).
+  const swrKey = `/analytics-${integration.id}-${date}-${loadNonce}`;
+
+  const { data, error, isLoading } = useSWR(swrKey, load, {
+    refreshInterval: 0,
+    refreshWhenHidden: false,
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+    revalidateIfStale: false,
+    refreshWhenOffline: false,
+    revalidateOnMount: true,
+    dedupingInterval: 0,
+    shouldRetryOnError: false,
+  });
 
   const refreshChannel = useCallback(
     (
@@ -230,12 +239,24 @@ export const RenderAnalytics: FC<{
     });
   }, [data]);
 
-  // Prefer SWR loading flags so remount/dedupe cannot leave a local spinner stuck
-  // after Network already returned 200.
-  if (!data && (isLoading || isValidating)) {
+  if (!data && isLoading) {
     return (
       <div className="flex items-center justify-center py-[48px]">
         <LoadingComponent />
+      </div>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[16px]">
+        <EmptyState onRefresh={refreshChannel(integration as any)} />
+        <p className="col-span-full text-center text-[13px] text-newTableText opacity-70">
+          {t(
+            'analytics_failed_to_load',
+            'Analytics failed to load. Refresh the channel or try again.'
+          )}
+        </p>
       </div>
     );
   }

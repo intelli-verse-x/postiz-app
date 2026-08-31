@@ -80,8 +80,9 @@ export const customFetch = (
       return fetchRequest;
     }
 
-    // @ts-ignore
-    return new Promise((res) => {}) as Response;
+    // Never return a Promise that never resolves — SWR/React Query will
+    // dedupe onto it and leave UIs stuck on loading with no new Network call.
+    throw new Error('Request was not continued after afterRequest handler');
   };
 };
 
