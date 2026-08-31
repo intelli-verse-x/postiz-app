@@ -496,77 +496,92 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       client.setCredentials({ access_token: accessToken });
 
       const youtubeClient = youtubeAnalytics(client);
-      const { data } = await youtubeClient.reports.query({
-        ids: 'channel==MINE',
-        startDate,
-        endDate,
-        metrics:
-          'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,likes,subscribersLost',
-        dimensions: 'day',
-        sort: 'day',
-      });
+      // Prefer the connected channel id (brand accounts). Fall back to MINE.
+      const channelIds = id?.trim()
+        ? [`channel==${id.trim()}`, 'channel==MINE']
+        : ['channel==MINE'];
 
-      const columns = data?.columnHeaders?.map((p) => p.name)!;
-      const mappedData = data?.rows?.map((p) => {
-        return columns.reduce((acc, curr, index) => {
-          acc[curr!] = p[index];
-          return acc;
-        }, {} as any);
-      });
+      let data: any;
+      let lastError: unknown;
+      for (const ids of channelIds) {
+        try {
+          const result = await youtubeClient.reports.query({
+            ids,
+            startDate,
+            endDate,
+            metrics:
+              'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,likes,subscribersLost',
+            dimensions: 'day',
+            sort: 'day',
+          });
+          data = result.data;
+          lastError = undefined;
+          break;
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      if (!data) {
+        if (lastError) {
+          console.error('Error fetching YouTube analytics:', lastError);
+        }
+        return [];
+      }
 
-      const acc = [] as any[];
-      acc.push({
-        label: 'Estimated Minutes Watched',
-        data: mappedData?.map((p: any) => ({
-          total: p.estimatedMinutesWatched,
-          date: p.day,
-        })),
-      });
+      const columns = data?.columnHeaders?.map((p: any) => p.name) || [];
+      const mappedData =
+        data?.rows?.map((p: any[]) => {
+          return columns.reduce((acc: any, curr: string, index: number) => {
+            acc[curr!] = p[index];
+            return acc;
+          }, {} as any);
+        }) ?? [];
 
-      acc.push({
-        label: 'Average View Duration',
-        average: true,
-        data: mappedData?.map((p: any) => ({
-          total: p.averageViewDuration,
-          date: p.day,
-        })),
-      });
+      // Frontend charts also read optional `average` (not on AnalyticsData).
+      const toSeries = (metric: string) =>
+        mappedData.map((p: any) => ({
+          total: String(p[metric] ?? 0),
+          date: String(p.day || ''),
+        }));
 
-      acc.push({
-        label: 'Average View Percentage',
-        average: true,
-        data: mappedData?.map((p: any) => ({
-          total: p.averageViewPercentage,
-          date: p.day,
-        })),
-      });
-
-      acc.push({
-        label: 'Subscribers Gained',
-        data: mappedData?.map((p: any) => ({
-          total: p.subscribersGained,
-          date: p.day,
-        })),
-      });
-
-      acc.push({
-        label: 'Subscribers Lost',
-        data: mappedData?.map((p: any) => ({
-          total: p.subscribersLost,
-          date: p.day,
-        })),
-      });
-
-      acc.push({
-        label: 'Likes',
-        data: mappedData?.map((p: any) => ({
-          total: p.likes,
-          date: p.day,
-        })),
-      });
+      const acc: any[] = [
+        {
+          label: 'Estimated Minutes Watched',
+          percentageChange: 0,
+          data: toSeries('estimatedMinutesWatched'),
+        },
+        {
+          label: 'Average View Duration',
+          average: true,
+          percentageChange: 0,
+          data: toSeries('averageViewDuration'),
+        },
+        {
+          label: 'Average View Percentage',
+          average: true,
+          percentageChange: 0,
+          data: toSeries('averageViewPercentage'),
+        },
+        {
+          label: 'Subscribers Gained',
+          percentageChange: 0,
+          data: toSeries('subscribersGained'),
+        },
+        {
+          label: 'Subscribers Lost',
+          percentageChange: 0,
+          data: toSeries('subscribersLost'),
+        },
+        {
+          label: 'Likes',
+          percentageChange: 0,
+          data: toSeries('likes'),
+        },
+      ];
 
       return acc;
     } catch (err) {
+      console.error('Error fetching YouTube analytics:', err);
       return [];
     }
   }
