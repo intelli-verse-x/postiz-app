@@ -31,9 +31,11 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
   oneTimeToken = true;
 
   isBetweenSteps = false;
+  // No 'openid' / 'profile': the LinkedIn app runs the Community Management
+  // API product, which LinkedIn requires to be the ONLY product on the app —
+  // "Sign In with LinkedIn using OpenID Connect" cannot be added next to it.
+  // Identity comes from /v2/me via r_basicprofile instead of /v2/userinfo.
   scopes = [
-    'openid',
-    'profile',
     'w_member_social',
     'r_basicprofile',
     'rw_organization_admin',
@@ -95,6 +97,39 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     return undefined;
   }
 
+  // r_basicprofile replacement for the OpenID /v2/userinfo endpoint: the
+  // Community Management API product does not grant 'openid'/'profile'.
+  // LinkedIn's OpenID `sub` equals the /v2/me `id`, so integration internal
+  // ids stay stable across this change.
+  protected async fetchProfile(accessToken: string): Promise<{
+    id: string;
+    name: string;
+    picture: string;
+    username: string;
+  }> {
+    const me = await (
+      await fetch(
+        'https://api.linkedin.com/v2/me?projection=(id,vanityName,localizedFirstName,localizedLastName,profilePicture(displayImage~digitalmediaAsset:playableStreams))',
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      )
+    ).json();
+
+    return {
+      id: me.id,
+      name: [me.localizedFirstName, me.localizedLastName]
+        .filter(Boolean)
+        .join(' '),
+      picture:
+        me?.profilePicture?.['displayImage~']?.elements?.[0]?.identifiers?.[0]
+          ?.identifier || '',
+      username: me.vanityName,
+    };
+  }
+
   async refreshToken(refresh_token: string): Promise<AuthTokenDetails> {
     const {
       access_token: accessToken,
@@ -115,25 +150,9 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
       })
     ).json();
 
-    const { vanityName } = await (
-      await fetch('https://api.linkedin.com/v2/me', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-    ).json();
-
-    const {
-      name,
-      sub: id,
-      picture,
-    } = await (
-      await fetch('https://api.linkedin.com/v2/userinfo', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-    ).json();
+    const { id, name, picture, username } = await this.fetchProfile(
+      accessToken
+    );
 
     return {
       id,
@@ -142,7 +161,7 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
       expiresIn: expires_in,
       name,
       picture: picture || '',
-      username: vanityName,
+      username,
     };
   }
 
@@ -195,25 +214,9 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
 
     this.checkScopes(this.scopes, scope);
 
-    const {
-      name,
-      sub: id,
-      picture,
-    } = await (
-      await fetch('https://api.linkedin.com/v2/userinfo', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-    ).json();
-
-    const { vanityName } = await (
-      await fetch('https://api.linkedin.com/v2/me', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-    ).json();
+    const { id, name, picture, username } = await this.fetchProfile(
+      accessToken
+    );
 
     return {
       id,
@@ -222,7 +225,7 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
       expiresIn,
       name,
       picture,
-      username: vanityName,
+      username,
     };
   }
 
