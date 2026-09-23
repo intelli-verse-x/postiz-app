@@ -14,6 +14,7 @@ import { InstagramAudioSelector } from '@gitroom/frontend/components/new-launch/
 import { useIntegration } from '@gitroom/frontend/components/launches/helpers/use.integration';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { InstagramPreview } from '@gitroom/frontend/components/new-launch/providers/instagram/instagram.preview';
+import { MediaComponent } from '@gitroom/frontend/components/media/media.component';
 const postType = [
   {
     value: 'post',
@@ -106,6 +107,19 @@ const InstagramCollaborators: FC<{
               ))}
             </Select>
           )}
+        </div>
+      )}
+
+      {postCurrentType !== 'story' && (
+        <div className="mt-[20px]">
+          <MediaComponent
+            type="image"
+            width={1280}
+            height={720}
+            label="Thumbnail"
+            description="Custom cover image is not supported by Instagram's API. Use media Create Thumbnail to pick a video frame instead."
+            {...register('thumbnail')}
+          />
         </div>
       )}
     </>

@@ -263,11 +263,13 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     accessToken: string,
     personId: string,
     picture: any,
-    type = 'personal' as 'company' | 'personal'
+    type = 'personal' as 'company' | 'personal',
+    thumbnailBuffer?: Buffer
   ) {
     // Determine the appropriate endpoint based on file type
     const isVideo = hasExtension(fileName, 'mp4');
     const isPdf = hasExtension(fileName, 'pdf');
+    const wantsThumbnail = Boolean(isVideo && thumbnailBuffer?.length);
 
     let endpoint: string;
     if (isVideo) {
@@ -279,7 +281,15 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     }
 
     const {
-      value: { uploadUrl, image, video, document, uploadInstructions, ...all },
+      value: {
+        uploadUrl,
+        image,
+        video,
+        document,
+        uploadInstructions,
+        thumbnailUploadUrl,
+        ...all
+      },
     } = await (
       await this.fetch(
         `https://api.linkedin.com/rest/${endpoint}?action=initializeUpload`,
@@ -301,7 +311,7 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
                 ? {
                     fileSizeBytes: picture.length,
                     uploadCaptions: false,
-                    uploadThumbnail: false,
+                    uploadThumbnail: wantsThumbnail,
                   }
                 : {}),
             },
@@ -315,6 +325,28 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
 
     const etags = [];
     if (isVideo) {
+      if (wantsThumbnail && thumbnailUploadUrl && thumbnailBuffer) {
+        // LinkedIn Videos API: PUT the still image to thumbnailUploadUrl
+        // before (or alongside) the video parts, then finalizeUpload.
+        await this.fetch(
+          thumbnailUploadUrl,
+          {
+            method: 'PUT',
+            headers: {
+              'X-Restli-Protocol-Version': '2.0.0',
+              'LinkedIn-Version': '202601',
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/octet-stream',
+              'media-type-family': 'STILLIMAGE',
+            },
+            body: thumbnailBuffer,
+          },
+          'linkedin',
+          0,
+          true
+        );
+      }
+
       // Only the Videos API uses multipart chunked uploads. Each 2MB part is
       // PUT separately and the returned etags are passed to finalizeUpload.
       for (let i = 0; i < picture.length; i += 1024 * 1024 * 2) {
@@ -594,12 +626,21 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
               mediaBuffer = await this.prepareMediaBuffer(media.path);
             }
 
+            const isVideo = hasExtension(media.path, 'mp4');
+            let thumbnailBuffer: Buffer | undefined;
+            if (isVideo && post.settings?.thumbnail?.path) {
+              thumbnailBuffer = await this.prepareMediaBuffer(
+                post.settings.thumbnail.path
+              );
+            }
+
             const uploadedMediaId = await this.uploadPicture(
               media.path,
               accessToken,
               personId,
               mediaBuffer,
-              type
+              type,
+              thumbnailBuffer
             );
 
             return {

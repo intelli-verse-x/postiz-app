@@ -9,6 +9,7 @@ import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { timer } from '@gitroom/helpers/utils/timer';
 import dayjs from 'dayjs';
 import {
+  BadBody,
   SocialAbstract,
   ValidityMedia,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
@@ -79,6 +80,12 @@ export class InstagramProvider
       if (!hasVideo) {
         return 'Audio can only be added to a video Reel';
       }
+    }
+    if (settings?.thumbnail?.path) {
+      return (
+        'Instagram Graph API cannot apply a custom cover image to Reels or videos. ' +
+        'Clear the Thumbnail setting and use media Create Thumbnail to pick a video frame instead.'
+      );
     }
     return true;
   }
@@ -604,6 +611,21 @@ export class InstagramProvider
     const [accessToken, userToken] = token.split('___');
     const [firstPost] = postDetails;
     console.log('in progress', id);
+
+    if (firstPost.settings?.thumbnail?.path) {
+      const hasVideo = firstPost.media?.some(
+        (m) => (m?.path?.indexOf?.('mp4') ?? -1) > -1
+      );
+      if (hasVideo) {
+        throw new BadBody(
+          this.identifier,
+          '{}',
+          '{}',
+          'Instagram Graph API cannot apply a custom cover image to Reels or videos. Clear the Thumbnail setting and use media Create Thumbnail to pick a video frame (thumb_offset) instead.'
+        );
+      }
+    }
+
     const isStory = firstPost.settings.post_type === 'story';
     const isTrialReel = this.assetBoolean(firstPost.settings.is_trial_reel);
     const medias = await Promise.all(
