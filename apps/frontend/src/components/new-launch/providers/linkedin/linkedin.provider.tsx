@@ -10,10 +10,11 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useSettings } from '@gitroom/frontend/components/launches/helpers/use.values';
 import { LinkedinDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/linkedin.dto';
 import { LinkedinPreview } from '@gitroom/frontend/components/new-launch/providers/linkedin/linkedin.preview';
+import { MediaComponent } from '@gitroom/frontend/components/media/media.component';
 
 const LinkedInSettings = () => {
   const t = useT();
-  const { watch, register, formState, control } = useSettings();
+  const { watch, register } = useSettings();
   const isCarousel = watch('post_as_images_carousel');
 
   return (
@@ -34,6 +35,16 @@ const LinkedInSettings = () => {
           />
         </div>
       )}
+      <div className="mt-[20px]">
+        <MediaComponent
+          type="image"
+          width={1280}
+          height={720}
+          label="Thumbnail"
+          description="Custom cover for video posts (optional). Ignored for image-only posts."
+          {...register('thumbnail')}
+        />
+      </div>
     </div>
   );
 };

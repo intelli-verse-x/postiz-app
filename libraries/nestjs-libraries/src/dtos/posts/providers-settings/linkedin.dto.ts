@@ -1,4 +1,6 @@
-import { IsBoolean, IsOptional, IsString } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsBoolean, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { MediaDto } from '@gitroom/nestjs-libraries/dtos/media/media.dto';
 
 export class LinkedinDto {
   @IsBoolean()
@@ -8,4 +10,9 @@ export class LinkedinDto {
   @IsString()
   @IsOptional()
   carousel_name?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MediaDto)
+  thumbnail?: MediaDto;
 }
