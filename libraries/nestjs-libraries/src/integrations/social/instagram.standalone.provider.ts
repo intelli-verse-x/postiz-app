@@ -60,6 +60,12 @@ export class InstagramStandaloneProvider
         return 'Trial Reels must be a video';
       }
     }
+    if (settings?.thumbnail?.path) {
+      return (
+        'Instagram Graph API cannot apply a custom cover image to Reels or videos. ' +
+        'Clear the Thumbnail setting and use media Create Thumbnail to pick a video frame instead.'
+      );
+    }
     return true;
   }
 
