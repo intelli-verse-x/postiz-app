@@ -90,7 +90,10 @@ const InstagramCollaborators: FC<{
             {...register('is_trial_reel', {
               value: false,
             })}
-            label={t('trial_reel', 'Trial Reel (share only to non-followers first)')}
+            label={t(
+              'trial_reel',
+              'Trial Reel (share only to non-followers first)'
+            )}
           />
 
           {isTrialReel && (
@@ -117,11 +120,17 @@ const InstagramCollaborators: FC<{
             width={1280}
             height={720}
             label="Thumbnail"
-            description="Custom cover image is not supported by Instagram's API. Use media Create Thumbnail to pick a video frame instead."
+            description="Custom cover image for a Reel. You can also choose a cover in the media settings."
             {...register('thumbnail')}
           />
         </div>
       )}
+      <div className="mt-[18px]">
+        <Checkbox
+          label={t('label_made_with_ai', 'Made with AI')}
+          {...register('made_with_ai')}
+        />
+      </div>
     </>
   );
 };
@@ -132,5 +141,5 @@ export default withProvider<InstagramDto>({
   CustomPreviewComponent: InstagramPreview,
   dto: InstagramDto,
   maximumCharacters: 2200,
-  comments: 'no-media'
+  comments: 'no-media',
 });
