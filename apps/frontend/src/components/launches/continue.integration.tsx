@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { Redirect } from '@gitroom/frontend/components/layout/redirect';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
-import dayjs from 'dayjs';
 import { continueProviderList } from '@gitroom/frontend/components/new-launch/providers/continue-provider/list';
 import { IntegrationContext } from '@gitroom/frontend/components/launches/helpers/use.integration';
 import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
@@ -78,6 +77,15 @@ export const ContinueIntegration: FC<{
       };
     }
 
+    if (provider === 'tiktok-business') {
+      // The TikTok Business API redirects back with `auth_code` instead of `code`
+      return {
+        state: searchParams.state || '',
+        code: searchParams.auth_code || searchParams.code || '',
+        refresh: searchParams.refresh || '',
+      };
+    }
+
     if (provider === 'vk') {
       return {
         ...searchParams,
@@ -102,194 +110,205 @@ export const ContinueIntegration: FC<{
 
   useEffect(() => {
     (async () => {
-      const timezone = String(dayjs.tz().utcOffset());
+      const timezone = String(newDayjs().utcOffset());
       try {
-
-      // Replay guard: OAuth states are single-use. If this page reloads after a
-      // successful connect (e.g. DevTools device-mode reload), re-POSTing the
-      // consumed state returns "Invalid state" and used to strand the spinner.
-      const stateKey = `postiz_done:${modifiedParams.state || ''}`;
-      try {
-        const prev = modifiedParams.state
-          ? sessionStorage.getItem(stateKey)
-          : null;
-        if (prev) {
-          if (prev.startsWith('http') || prev.startsWith('/')) {
-            window.location.replace(prev);
-          } else {
-            setSuccessState({
-              message:
-                'This channel was already connected. You can close this window.',
-            });
-          }
-          return;
-        }
-      } catch {}
-      const markDone = (dest?: string) => {
+        // Replay guard: OAuth states are single-use. If this page reloads after a
+        // successful connect (e.g. DevTools device-mode reload), re-POSTing the
+        // consumed state returns "Invalid state" and used to strand the spinner.
+        const stateKey = `postiz_done:${modifiedParams.state || ''}`;
         try {
-          if (modifiedParams.state) {
-            sessionStorage.setItem(stateKey, dest || 'done');
-          }
-        } catch {}
-      };
-
-      // Try public endpoint first (handles both public and fallback scenarios)
-      let data = await fetch(`/integrations/social-connect/${provider}`, {
-        method: 'POST',
-        body: JSON.stringify({ ...modifiedParams, timezone }),
-      });
-
-      // If public endpoint fails with specific errors, try authenticated endpoint
-      if (data.status === HttpStatusCode.BadRequest) {
-        const errorData = await data.json().catch(() => ({}));
-        // "Invalid connection type" means this wasn't started as a public flow
-        if (
-          errorData.message?.includes('Invalid connection type') ||
-          errorData.message?.includes('Invalid or expired state')
-        ) {
-          data = await fetch(`/integrations/social-connect/${provider}`, {
-            method: 'POST',
-            body: JSON.stringify({ ...modifiedParams, timezone }),
-          });
-        }
-      }
-
-      if (data.status === HttpStatusCode.PreconditionFailed) {
-        const { returnURL } = await data.json().catch(() => ({}));
-        navigateOrShow(
-          `/launches?precondition=true`,
-          returnURL,
-          'Precondition failed'
-        );
-        return;
-      }
-
-      if (data.status === HttpStatusCode.NotAcceptable) {
-        const { msg, returnURL } = await data.json();
-        navigateOrShow(`/launches?msg=${msg}`, returnURL, msg);
-        return;
-      }
-
-      if (
-        data.status !== HttpStatusCode.Ok &&
-        data.status !== HttpStatusCode.Created
-      ) {
-        const errorData = await data.json().catch(() => ({}));
-        setErrorMessage(
-          errorData.message || errorData.msg || 'Could not add provider'
-        );
-        setError(true);
-        return;
-      }
-
-      const {
-        inBetweenSteps,
-        id,
-        onboarding: resOnboarding,
-        pages,
-        returnURL,
-        extensionToken,
-      } = await data.json();
-      const onboarding = resOnboarding || searchParams.onboarding === 'true';
-
-      // Store refresh token in extension for background cookie refresh
-      if (
-        extensionToken &&
-        extensionId &&
-        typeof chrome !== 'undefined' &&
-        chrome?.runtime?.sendMessage
-      ) {
-        try {
-          chrome.runtime.sendMessage(
-            extensionId,
-            {
-              type: 'STORE_REFRESH_TOKEN',
-              provider,
-              integrationId: id,
-              jwt: extensionToken,
-              backendUrl,
-            },
-            () => {}
-          );
-        } catch {
-          // Silently ignore — extension may not be available
-        }
-      }
-
-      // If it's a two-step provider, show the selection UI inline
-      if (inBetweenSteps && !searchParams.refresh) {
-        if (returnURL) {
-          // Bounce to Studio with pages + state for Studio picker (Phase B).
-          // btoa() alone throws on non-Latin1 (e.g. Hindi/emoji channel
-          // names), so base64-encode the UTF-8 bytes instead.
-          const pagesBytes = new TextEncoder().encode(
-            JSON.stringify(pages || [])
-          );
-          let pagesBin = '';
-          pagesBytes.forEach((b) => {
-            pagesBin += String.fromCharCode(b);
-          });
-          const pagesB64 = btoa(pagesBin);
-          // returnURL already carries Studio's own query params — append with
-          // '&' or the whole step=pick payload gets swallowed by the last param.
-          const pickSep = returnURL.includes('?') ? '&' : '?';
-          const dest = `${returnURL}${pickSep}step=pick&integration_id=${encodeURIComponent(id)}&state=${encodeURIComponent(modifiedParams.state || '')}&pages=${encodeURIComponent(pagesB64)}&provider=${encodeURIComponent(provider)}`;
-          markDone(dest);
-          window.location.assign(dest);
-          return;
-        }
-        // No returnURL — show Postiz picker as before
-        setTwoStepState({
-          integrationId: id,
-          onboarding,
-          pages: pages || [],
-          returnURL,
-        });
-        return;
-      }
-
-      markDone(returnURL || undefined);
-
-      // Popup flow (non-picker): postMessage the opener then close
-      if (typeof window !== 'undefined' && window.opener) {
-        try {
-          // Use known Studio origins for security; fall back to '*' if not configured
-          const studioOrigins = (process.env.NEXT_PUBLIC_CONTENTX_STUDIO_ORIGINS || '')
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean);
-          const targetOrigin = studioOrigins[0] || '*';
-          window.opener.postMessage(
-            { type: 'postiz-connected', provider, integrationId: id },
-            targetOrigin
-          );
-        } catch {}
-        window.close();
-        // Google/X send COOP headers that make window.close() a silent no-op
-        // for this popup — without this fallback the tab strands on the
-        // spinner even though the channel connected successfully.
-        window.setTimeout(() => {
-          if (!window.closed) {
-            if (returnURL) {
-              window.location.assign(returnURL);
+          const prev = modifiedParams.state
+            ? sessionStorage.getItem(stateKey)
+            : null;
+          if (prev) {
+            if (prev.startsWith('http') || prev.startsWith('/')) {
+              window.location.replace(prev);
             } else {
               setSuccessState({
                 message:
-                  'Your channel has been connected. You can close this window.',
+                  'This channel was already connected. You can close this window.',
               });
             }
+            return;
           }
-        }, 400);
-        return;
-      }
+        } catch {}
+        const markDone = (dest?: string) => {
+          try {
+            if (modifiedParams.state) {
+              sessionStorage.setItem(stateKey, dest || 'done');
+            }
+          } catch {}
+        };
 
-      navigateOrShow(
-        `/launches?added=${provider}&msg=Channel Updated${
-          onboarding ? '&onboarding=true' : ''
-        }`,
-        returnURL,
-        'Channel Updated'
-      );
+        // Try public endpoint first (handles both public and fallback scenarios)
+        let data = await fetch(`/integrations/social-connect/${provider}`, {
+          method: 'POST',
+          body: JSON.stringify({ ...modifiedParams, timezone }),
+        });
+
+        // If public endpoint fails with specific errors, try authenticated endpoint
+        if (data.status === HttpStatusCode.BadRequest) {
+          const errorData = await data.json().catch(() => ({}));
+          // "Invalid connection type" means this wasn't started as a public flow
+          if (
+            errorData.message?.includes('Invalid connection type') ||
+            errorData.message?.includes('Invalid or expired state')
+          ) {
+            data = await fetch(`/integrations/social-connect/${provider}`, {
+              method: 'POST',
+              body: JSON.stringify({ ...modifiedParams, timezone }),
+            });
+          }
+        }
+
+        if (data.status === HttpStatusCode.PreconditionFailed) {
+          const { returnURL } = await data.json().catch(() => ({}));
+          navigateOrShow(
+            `/launches?precondition=true`,
+            returnURL,
+            'Precondition failed'
+          );
+          return;
+        }
+
+        if (data.status === HttpStatusCode.NotAcceptable) {
+          const { msg, returnURL } = await data.json();
+          navigateOrShow(`/launches?msg=${msg}`, returnURL, msg);
+          return;
+        }
+
+        if (
+          data.status !== HttpStatusCode.Ok &&
+          data.status !== HttpStatusCode.Created
+        ) {
+          const errorData = await data.json().catch(() => ({}));
+          setErrorMessage(
+            errorData.message || errorData.msg || 'Could not add provider'
+          );
+          setError(true);
+          return;
+        }
+
+        const {
+          inBetweenSteps,
+          id,
+          onboarding: resOnboarding,
+          pages,
+          returnURL,
+          extensionToken,
+        } = await data.json();
+        const onboarding = resOnboarding || searchParams.onboarding === 'true';
+
+        // Store refresh token in extension for background cookie refresh
+        if (
+          extensionToken &&
+          extensionId &&
+          typeof chrome !== 'undefined' &&
+          chrome?.runtime?.sendMessage
+        ) {
+          try {
+            chrome.runtime.sendMessage(
+              extensionId,
+              {
+                type: 'STORE_REFRESH_TOKEN',
+                provider,
+                integrationId: id,
+                jwt: extensionToken,
+                backendUrl,
+              },
+              () => {
+                if (chrome.runtime.lastError) {
+                  return;
+                }
+              }
+            );
+          } catch {
+            // Silently ignore — extension may not be available
+          }
+        }
+
+        // If it's a two-step provider, show the selection UI inline
+        if (inBetweenSteps && !searchParams.refresh) {
+          if (returnURL) {
+            // Bounce to Studio with pages + state for Studio picker (Phase B).
+            // btoa() alone throws on non-Latin1 (e.g. Hindi/emoji channel
+            // names), so base64-encode the UTF-8 bytes instead.
+            const pagesBytes = new TextEncoder().encode(
+              JSON.stringify(pages || [])
+            );
+            let pagesBin = '';
+            pagesBytes.forEach((b) => {
+              pagesBin += String.fromCharCode(b);
+            });
+            const pagesB64 = btoa(pagesBin);
+            // returnURL already carries Studio's own query params — append with
+            // '&' or the whole step=pick payload gets swallowed by the last param.
+            const pickSep = returnURL.includes('?') ? '&' : '?';
+            const dest = `${returnURL}${pickSep}step=pick&integration_id=${encodeURIComponent(
+              id
+            )}&state=${encodeURIComponent(
+              modifiedParams.state || ''
+            )}&pages=${encodeURIComponent(
+              pagesB64
+            )}&provider=${encodeURIComponent(provider)}`;
+            markDone(dest);
+            window.location.assign(dest);
+            return;
+          }
+          // No returnURL — show Postiz picker as before
+          setTwoStepState({
+            integrationId: id,
+            onboarding,
+            pages: pages || [],
+            returnURL,
+          });
+          return;
+        }
+
+        markDone(returnURL || undefined);
+
+        // Popup flow (non-picker): postMessage the opener then close
+        if (typeof window !== 'undefined' && window.opener) {
+          try {
+            // Use known Studio origins for security; fall back to '*' if not configured
+            const studioOrigins = (
+              process.env.NEXT_PUBLIC_CONTENTX_STUDIO_ORIGINS || ''
+            )
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean);
+            const targetOrigin = studioOrigins[0] || '*';
+            window.opener.postMessage(
+              { type: 'postiz-connected', provider, integrationId: id },
+              targetOrigin
+            );
+          } catch {}
+          window.close();
+          // Google/X send COOP headers that make window.close() a silent no-op
+          // for this popup — without this fallback the tab strands on the
+          // spinner even though the channel connected successfully.
+          window.setTimeout(() => {
+            if (!window.closed) {
+              if (returnURL) {
+                window.location.assign(returnURL);
+              } else {
+                setSuccessState({
+                  message:
+                    'Your channel has been connected. You can close this window.',
+                });
+              }
+            }
+          }, 400);
+          return;
+        }
+
+        navigateOrShow(
+          `/launches?added=${provider}&msg=Channel Updated${
+            onboarding ? '&onboarding=true' : ''
+          }`,
+          returnURL,
+          'Channel Updated'
+        );
       } catch (err: any) {
         // Never strand the spinner: surface anything unexpected (network
         // failure, malformed response, blocked storage) as the error screen.
@@ -313,10 +332,23 @@ export const ContinueIntegration: FC<{
           ? `/integrations/provider/${twoStepState.integrationId}/connect`
           : `/integrations/public/provider/${twoStepState.integrationId}/connect`;
 
-        const response = await fetch(endpoint, {
+        const body = JSON.stringify({ ...modifiedParams, ...data });
+        let response = await fetch(endpoint, {
           method: 'POST',
-          body: JSON.stringify({ ...modifiedParams, ...data }),
+          body,
         });
+
+        // Logged into another organization than the one the channel is added
+        // to (a connect link or an invite link): save it by the connection state
+        if (logged && response.status === HttpStatusCode.NotFound) {
+          response = await fetch(
+            `/integrations/public/provider/${twoStepState.integrationId}/connect`,
+            {
+              method: 'POST',
+              body,
+            }
+          );
+        }
 
         if (
           response.status !== HttpStatusCode.Ok &&
@@ -359,6 +391,7 @@ export const ContinueIntegration: FC<{
       youtube: 'YouTube',
       gmb: 'Google Business',
       tumblr: 'Tumblr',
+      'tiktok-business': 'TikTok Business',
     };
     return names[provider] || provider;
   }, [provider]);
