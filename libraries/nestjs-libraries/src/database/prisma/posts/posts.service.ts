@@ -184,6 +184,9 @@ export class PostsService {
       'http://content-factory-api.aicart.svc.cluster.local:8001';
     try {
       const resp = await axios.get(`${cfApiBase}/api/media/run-metadata`, {
+        headers: process.env.CF_AUTOMATION_API_KEY
+          ? { 'X-API-Key': process.env.CF_AUTOMATION_API_KEY }
+          : undefined,
         params: { key: s3Key },
         timeout: 15000,
       });
@@ -240,7 +243,7 @@ export class PostsService {
   ): Promise<void> {
     const cfApiBase =
       process.env.CF_API_URL ||
-      'http://content-factory-api.aicart.svc.cluster.local:8000';
+      'http://content-factory-api.aicart.svc.cluster.local:8001';
     try {
       await axios.post(
         `${cfApiBase}/api/automation/publish-status`,
@@ -253,7 +256,12 @@ export class PostsService {
           error: errorMessage || null,
           timestamp: new Date().toISOString(),
         },
-        { timeout: 30000 }
+        {
+          headers: process.env.CF_AUTOMATION_API_KEY
+            ? { 'X-API-Key': process.env.CF_AUTOMATION_API_KEY }
+            : undefined,
+          timeout: 30000,
+        }
       );
     } catch (err) {
       console.error(`[notifyContentFactory] Failed to notify CF API: ${err}`);

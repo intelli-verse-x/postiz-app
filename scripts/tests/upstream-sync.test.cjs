@@ -62,3 +62,47 @@ test('provider rejection records ERROR and reports it without another publish at
   assert.equal(calls.find(c => c.name === 'notifyContentFactory').args[1], 'ERROR');
   assert.equal(calls.filter(c => c.name === 'updatePost').length, 0);
 });
+
+function contentFactoryService(env = {}) {
+  const source = fs.readFileSync(path.join(__dirname, '../../libraries/nestjs-libraries/src/database/prisma/posts/posts.service.ts'), 'utf8');
+  const ast = ts.createSourceFile('posts.service.ts', source, ts.ScriptTarget.Latest, true);
+  const service = ast.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'PostsService');
+  const methods = service.members.filter(node => ts.isMethodDeclaration(node) && ['enrichPostMetadata', 'notifyContentFactory'].includes(node.name.getText(ast)));
+  const code = ts.transpileModule(`class TestService { ${methods.map(node => node.getText(ast)).join('\n')} } exports.TestService = TestService;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText;
+  const calls = [];
+  const axios = {
+    get: async (...args) => { calls.push({ method: 'GET', args }); return { data: { title: 'A reviewed Content Factory title', hook: 'A reviewed description for the post', tags: ['test'] } }; },
+    post: async (...args) => { calls.push({ method: 'POST', args }); return { status: 200 }; },
+  };
+  const exports = {};
+  vm.runInNewContext(code, { exports, axios, process: { env }, URL, console: { log() {}, error() {} } });
+  const instance = new exports.TestService();
+  instance._postRepository = { updatePostSettings: async (...args) => calls.push({ method: 'persist', args }) };
+  return { instance, calls };
+}
+
+test('Content Factory enrichment and callbacks authenticate against its actual service port', async () => {
+  const key = 'unit-test-machine-key';
+  const { instance, calls } = contentFactoryService({ CF_AUTOMATION_API_KEY: key });
+  const post = { id: 'cf-post', settings: '{}', content: '', image: JSON.stringify([{ path: 'https://example.s3.amazonaws.com/run/video.mp4' }]) };
+  await instance.enrichPostMetadata(post);
+  await instance.notifyContentFactory(post.id, 'PUBLISHED', 'youtube', 'Test channel', 'https://example.test/live');
+  const get = calls.find(call => call.method === 'GET');
+  const callback = calls.find(call => call.method === 'POST');
+  assert.equal(get.args[0], 'http://content-factory-api.aicart.svc.cluster.local:8001/api/media/run-metadata');
+  assert.equal(get.args[1].headers['X-API-Key'], key);
+  assert.equal(get.args[1].params.key, 'run/video.mp4');
+  assert.equal(JSON.parse(post.settings).title, 'A reviewed Content Factory title');
+  assert.equal(calls.filter(call => call.method === 'persist').length, 1);
+  assert.equal(callback.args[0], 'http://content-factory-api.aicart.svc.cluster.local:8001/api/automation/publish-status');
+  assert.equal(callback.args[2].headers['X-API-Key'], key);
+  assert.equal(callback.args[1].release_url, 'https://example.test/live');
+});
+
+test('Content Factory callback honors an explicitly configured API URL', async () => {
+  const { instance, calls } = contentFactoryService({ CF_API_URL: 'https://cf.example.test', CF_AUTOMATION_API_KEY: 'unit-test-machine-key' });
+  await instance.notifyContentFactory('cf-post', 'ERROR', 'youtube', 'Test channel', undefined, 'Provider rejected media');
+  assert.equal(calls[0].args[0], 'https://cf.example.test/api/automation/publish-status');
+  assert.equal(calls[0].args[1].state, 'ERROR');
+  assert.equal(calls[0].args[1].error, 'Provider rejected media');
+});
