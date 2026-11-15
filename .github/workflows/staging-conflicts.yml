@@ -21,6 +21,8 @@ concurrency:
 
 jobs:
   resolve:
+    # Forks deploy independently and do not have upstream's staging branch or keys.
+    if: github.repository == 'gitroomhq/postiz-app'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
